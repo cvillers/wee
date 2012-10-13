@@ -4,16 +4,28 @@ var oldZoom = null, zoom = null;
 var markers = [];
 var infoWindows = [];
 
+var knownVenuesPoints = [];
+var knownVenuesHeatmap = [];
+var hmData = [];
+
 var token = "CLIENT-TOKEN";
 var apiUrl = "https://api.foursquare.com/";
 var fsqLoadTimeout = null;
+
+function wantHeatmap() {
+	return $("input#heatmap_toggle").is(":checked");
+}
+
+function wantPoints() {
+	return $("input#points_toggle").is(":checked");
+}
 
 function makeRequest(query, callback) {
   var query = query + ((query.indexOf('?') > -1) ? '&' : '?') + 'oauth_token=' + token + '&v=20121013&callback=?';
   $.getJSON(apiUrl + 'v2/' + query, {}, callback);
 };
 
-function loadPlaces(force) {
+function loadPlaces(force, clearPoints, clearHeatmap) {
 	oldCenter = center;
 	center = map.getCenter();
 	oldZoom = zoom;
@@ -22,9 +34,22 @@ function loadPlaces(force) {
 	var distance = google.maps.geometry.spherical.computeDistanceBetween(
 			oldCenter, center);
 
+	if(zoom < 13) {
+		heatmap.setMap(null);
+		knownVenuesHeatmap = [];
+		hmData = [];
+		for(var i = 0; i < markers.length; i++) {
+			markers[i].setMap(null);
+		}
+		markers = [];
+		knownVenuesPoints = [];
+	}
+
 	// if we didn't move far, don't bother loading new places
-	if ((distance > 300 && map.getZoom() >= 11)
-			|| (distance <= 30 && Math.abs(oldZoom - zoom) > 2) || force) {
+	if (//		(distance > 300 && map.getZoom() >= 11)
+		//	||	(distance <= 30 && Math.abs(oldZoom - zoom) > 2)
+				(distance >= 400 || zoom >= 15)
+			||	force) {
 
 		$("div#map_canvas").spin({
 			lines : 17, // The number of lines to draw
@@ -50,55 +75,75 @@ function loadPlaces(force) {
 		var radius = google.maps.geometry.spherical.computeDistanceBetween(
 				bounds.getSouthWest(), bounds.getNorthEast());
 
-		if (radius <= 7500) {
-			heatmap.setMap(null);
-			markers.forEach(function(m) { m.map = null; });
-			markers = [];
+		if (radius <= 8500) {
+			if(distance >= 4000 || clearPoints || clearHeatmap) {
+				if(clearHeatmap) {
+					heatmap.setMap(null);
+					knownVenuesHeatmap = [];
+					hmData = [];
+				}
+				if(clearPoints) {
+					for(var i = 0; i < markers.length; i++) {
+						markers[i].setMap(null);
+					}
+					
+					markers = [];
+					knownVenuesPoints = [];
+				}
+			}
 
 			// category id is fixed for now
 			var query = "venues/search?ll=LATLONG&categoryId=4d4b7105d754a06374d81259&radius=RAD&intent=browse";
-			query = query.replace(/LATLONG/, center.toUrlValue()).replace(
-					/RAD/, Math.ceil(radius).toString());
+			query = query.replace(/LATLONG/, center.toUrlValue()).replace(/RAD/, Math.ceil(radius).toString());
 
-			// $("div#debug-out").html(Math.ceil(radius).toString() + "<br />" +
-			// center.toUrlValue());
+			$("div#debug-out").html("radius: " + Math.ceil(radius).toString() + "<br />center: " + center.toUrlValue() + "<br/>distance:"  + distance.toString());
 
 			// load from foursquare
 			makeRequest(query, function(response) {
 				var venues = response["response"]["venues"];
-				// alert(venues.length);
-				var hmData = [];
 				venues.forEach(function(v) {
-					hmData.push({
-						location: new google.maps.LatLng(v.location.lat, v.location.lng),
-						weight: v.stats.checkinsCount == 0 ? 1 : v.stats.checkinsCount
-					});
+					if(wantHeatmap() && $.inArray(v.id, knownVenuesHeatmap) == -1) {
+						hmData.push({
+							location: new google.maps.LatLng(v.location.lat, v.location.lng),
+							weight: v.stats.checkinsCount == 0 ? 1 : v.stats.checkinsCount
+						});
+						knownVenuesHeatmap.push(v.id);
+					}
 
-					var marker = new google.maps.Marker({
-						position: new google.maps.LatLng(v.location.lat, v.location.lng),
-						map: map
-						//title: v.name,
-						//visible: true
-					});
-					
-					var infoWindow = new google.maps.InfoWindow({
-							content: 	"<h3>" + v.name + "</h3>" + 
-										"<p>" + v.stats.checkinsCount + " checkins from " + v.stats.usersCount + " people</p>"
-					});
-					infoWindows.push(infoWindow);
-					
-					google.maps.event.addListener(marker, 'click', function() {
-						infoWindows.forEach(function(i) { i.close(); });
-						infoWindow.open(map, marker);
-					});
-
-					markers.push(marker);
+					if(wantPoints() && $.inArray(v.id, knownVenuesPoints) == -1) {
+						var marker = new google.maps.Marker({
+							position: new google.maps.LatLng(v.location.lat, v.location.lng),
+							map: map
+							//title: v.name,
+							//visible: true
+						});
+						
+						markers.push(marker);
+						
+						var infoWindow = new google.maps.InfoWindow({
+								content: 	"<h3>" + v.name + "</h3>" + 
+											"<p>" + v.stats.checkinsCount + " checkins from " + v.stats.usersCount + " people</p>"
+						});
+						infoWindows.push(infoWindow);
+						
+						google.maps.event.addListener(marker, 'click', function() {
+							infoWindows.forEach(function(i) { i.close(); });
+							infoWindow.open(map, marker);
+						});
+						knownVenuesPoints.push(v.id);
+					}
 				});
-				var heatmap = new google.maps.visualization.HeatmapLayer({
-					data: hmData
-				});
-				heatmap.setData(hmData);
-				heatmap.setMap(map);
+				
+				if(wantHeatmap()) {
+					//if(heatmap != null)
+					//	heatmap.setMap(null);
+					heatmap = new google.maps.visualization.HeatmapLayer({
+						data: hmData,
+						dissipating: true
+					});
+					//heatmap.setData(hmData);
+					heatmap.setMap(map);
+				}
 			});
 		}
 
@@ -110,7 +155,7 @@ function loadPlaces(force) {
 function createMap(latitude, longitude) {
 	var mapOptions = {
 		center : new google.maps.LatLng(latitude, longitude),
-		zoom : 12,
+		zoom : 13,
 		mapTypeId : google.maps.MapTypeId.HYBRID
 	};
 		
@@ -119,9 +164,9 @@ function createMap(latitude, longitude) {
 	center = map.getCenter();
 	zoom = map.getZoom();
 
-	heatmap = new google.maps.visualization.HeatmapLayer({
-		dissipating: false
-	});
+	//heatmap = new google.maps.visualization.HeatmapLayer({
+	//	dissipating: true
+	//});
 	
 	google.maps.event.addListener(map, 'tilesloaded', function() {
 		loadPlaces(true);
@@ -133,7 +178,6 @@ function createMap(latitude, longitude) {
 		//loadPlaces();
 	});
 }
-
 /* spin.js options
 var opts = {
   lines: 17, // The number of lines to draw
@@ -165,7 +209,7 @@ $(document).ready(function() {
 				createMap(pos.coords.latitude, pos.coords.longitude);
 			},
 			function(error) {
-				alert("there was an error");
+				createMap(40.754781, -73.978532);
 			},
 			{
 				enableHighAccuracy: false,
@@ -174,6 +218,47 @@ $(document).ready(function() {
 			}
 		);
 	}
+	
+	$("input#points_toggle").change(function() {
+		if(wantPoints()) {
+			for(var i = 0; i < markers.length; i++) {
+				markers[i].setVisible(true);
+				loadPlaces(true, true, false);
+			}
+		}
+		else {
+			for(var i = 0; i < markers.length; i++) {
+				markers[i].setVisible(false);
+			}
+		}
+	});
+	
+	$("input#heatmap_toggle").change(function() {
+		if(wantHeatmap()) {
+			heatmap.setMap(map);
+			loadPlaces(true, false, true);
+		}
+		else {
+			heatmap.setMap(null);
+			hmData = [];
+		}
+	});
+	
+	$("button#search_button").click(function(e) {
+		e.preventDefault();
+		
+		var address = $("input#location").attr("value");
+		
+		var geocoder = new google.maps.Geocoder();
+		
+		geocoder.geocode({"address": address}, function(results, status) {
+			if (status == google.maps.GeocoderStatus.OK) {
+				map.setCenter(results[0].geometry.location);
+			} else {
+				alert("Searching was not successful : " + status);
+			}
+        });
+	});
 	
 	//loadPlaces();
 });

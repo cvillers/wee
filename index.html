@@ -49,6 +49,19 @@
 
         <div class="container">
 
+			<div class="row">
+				<form class="form-inline">
+					<input type="text" id="location" placeholder="Address" />
+					<button class="btn" id="search_button"><i class="icon-search"></i>&nbsp;Search</button>
+						
+					<label class="checkbox inline">
+						<input type="checkbox" id="points_toggle" value="show_points" checked="false" /> Show locations
+					</label>
+					<label class="checkbox inline">
+						<input type="checkbox" id="heatmap_toggle" value="show_heatmap" checked="true" /> Show popularity map
+					</label>
+				</form>
+			</div>
             <div class="row">
                 <div id="map_canvas"></div>
                 <!-- <div id="loader-spin"></div> -->
